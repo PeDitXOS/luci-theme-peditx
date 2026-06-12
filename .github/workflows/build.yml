@@ -1,12 +1,7 @@
-name: Release PeDitX Packages (External Source)
+name: Release PeDitX Packages (Auto-Version from Source)
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release Version (e.g., v1.0.0)'
-        required: true
-        default: 'v1.0.0'
   push:
     branches: [ "main" ]
 
@@ -32,6 +27,14 @@ jobs:
           git clone https://github.com/peditx/luci-theme-peditx.git src_projects/luci-theme-peditx
           git clone https://github.com/peditx/luci-theme-carbonpx.git src_projects/luci-theme-carbonpx
           git clone https://github.com/peditx/luci-app-themeswitch.git src_projects/luci-app-themeswitch
+
+      - name: Extract Version from Cloned Makefile
+        id: get_version
+        run: |
+          VERSION=$(grep -E 'PKG_VERSION\s*:=\s*' src_projects/luci-theme-peditx/Makefile | sed -E 's/PKG_VERSION\s*:=\s*//' | tr -d ' \n\r')
+          if [ -z "$VERSION" ]; then VERSION="1.0.0"; fi
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+          echo "🏷️ Detected Version from Source: v$VERSION"
 
       - name: Install Dependencies
         run: |
@@ -84,13 +87,13 @@ jobs:
           mkdir -p ../artifacts/apk
           find bin/ -type f -name "*.apk" -exec cp {} ../artifacts/apk/ \; 2>/dev/null || true
 
-      # ================= RELEASE IN TARGET REPO =================
+      # ================= RELEASE WITH AUTO-DETECTED VERSION =================
       - name: Publish to Current Repo Releases
         uses: softprops/action-gh-release@v2
         if: ${{ hashFiles('artifacts/**') != '' }}
         with:
-          tag_name: ${{ github.event.inputs.version || 'v1.0.0' }}
-          name: "PeDitX OS Packages ${{ github.event.inputs.version || 'v1.0.0' }}"
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: "PeDitX OS Packages ${{ steps.get_version.outputs.version }}"
           files: artifacts/**/*
           generate_release_notes: true
           draft: false
