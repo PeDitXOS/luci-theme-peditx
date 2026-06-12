@@ -1,10 +1,14 @@
-name: Release PeDitX Theme
+name: Release PeDitX Packages (External Source)
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release Version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
   push:
     branches: [ "main" ]
-    paths: [ "Makefile", ".github/workflows/**" ]
 
 permissions:
   contents: write
@@ -15,20 +19,19 @@ env:
 
 jobs:
   build-and-release:
-    name: Build & Release Theme
+    name: Build & Release
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Source
+      - name: Checkout Target Repo (PeDitXOS)
         uses: actions/checkout@v4
         
-      - name: Extract Version from Makefile
-        id: get_version
+      - name: Clone External Sources (peditx org)
         run: |
-          VERSION=$(grep -E 'PKG_VERSION\s*:=\s*' Makefile | sed -E 's/PKG_VERSION\s*:=\s*//' | tr -d ' \n\r')
-          if [ -z "$VERSION" ]; then VERSION="1.0.0"; fi
-          echo "version=v$VERSION" >> $GITHUB_OUTPUT
-          echo "🏷️ Detected Version: v$VERSION"
+          mkdir -p src_projects
+          git clone https://github.com/peditx/luci-theme-peditx.git src_projects/luci-theme-peditx
+          git clone https://github.com/peditx/luci-theme-carbonpx.git src_projects/luci-theme-carbonpx
+          git clone https://github.com/peditx/luci-app-themeswitch.git src_projects/luci-app-themeswitch
 
       - name: Install Dependencies
         run: |
@@ -36,48 +39,58 @@ jobs:
           sudo apt-get install -y build-essential libncurses5-dev gawk git gettext unzip zlib1g-dev file python3 curl wget zstd
 
       # ================= BUILD IPK (SDK 23.05) =================
-      - name: Build IPK Package
+      - name: Build IPK Packages
         run: |
           wget http://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz -O sdk_ipk.tar.xz
           mkdir sdk_ipk && tar -xJf sdk_ipk.tar.xz -C sdk_ipk --strip-components=1
           cd sdk_ipk
           ./scripts/feeds update -a && ./scripts/feeds install -a
           
-          mkdir -p package/luci-theme-peditx
-          cp -r ../* package/luci-theme-peditx/ --exclude=sdk* --exclude=.git --exclude=.github
+          projects=("luci-theme-peditx" "luci-theme-carbonpx" "luci-app-themeswitch")
+          for proj in "${projects[@]}"; do
+            mkdir -p package/$proj
+            cp -r ../src_projects/$proj/* package/$proj/
+            echo -e "CONFIG_PACKAGE_$proj=m\nCONFIG_LUCI_JSMIN=n\nCONFIG_LUCI_CSSTIDY=n" >> .config
+          done
           
-          echo -e "CONFIG_PACKAGE_luci-theme-peditx=m\nCONFIG_LUCI_JSMIN=n\nCONFIG_LUCI_CSSTIDY=n" >> .config
           make defconfig
-          make package/luci-theme-peditx/compile -j$(nproc) V=s || true
+          for proj in "${projects[@]}"; do
+            make package/$proj/compile -j$(nproc) V=s || true
+          done
           
           mkdir -p ../artifacts/ipk
           find bin/ -type f -name "*.ipk" -exec cp {} ../artifacts/ipk/ \; 2>/dev/null || true
 
       # ================= BUILD APK (SDK 25.12) =================
-      - name: Build APK Package
+      - name: Build APK Packages
         run: |
           wget http://downloads.openwrt.org/releases/25.12.0/targets/x86/64/openwrt-sdk-25.12.0-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst -O sdk_apk.tar.zst
           zstd -d sdk_apk.tar.zst && tar -xf sdk_apk.tar -C sdk_apk --strip-components=1
           cd sdk_apk
           ./scripts/feeds update -a && ./scripts/feeds install -a
           
-          mkdir -p package/luci-theme-peditx
-          cp -r ../* package/luci-theme-peditx/ --exclude=sdk* --exclude=.git --exclude=.github
+          projects=("luci-theme-peditx" "luci-theme-carbonpx" "luci-app-themeswitch")
+          for proj in "${projects[@]}"; do
+            mkdir -p package/$proj
+            cp -r ../src_projects/$proj/* package/$proj/
+            echo -e "CONFIG_PACKAGE_$proj=m\nCONFIG_LUCI_JSMIN=n\nCONFIG_LUCI_CSSTIDY=n" >> .config
+          done
           
-          echo -e "CONFIG_PACKAGE_luci-theme-peditx=m\nCONFIG_LUCI_JSMIN=n\nCONFIG_LUCI_CSSTIDY=n" >> .config
           make defconfig
-          make package/luci-theme-peditx/compile -j$(nproc) V=s || true
+          for proj in "${projects[@]}"; do
+            make package/$proj/compile -j$(nproc) V=s || true
+          done
           
           mkdir -p ../artifacts/apk
           find bin/ -type f -name "*.apk" -exec cp {} ../artifacts/apk/ \; 2>/dev/null || true
 
-      # ================= CREATE RELEASE =================
-      - name: Publish to GitHub Release
+      # ================= RELEASE IN TARGET REPO =================
+      - name: Publish to Current Repo Releases
         uses: softprops/action-gh-release@v2
         if: ${{ hashFiles('artifacts/**') != '' }}
         with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          name: "PeDitX Theme ${{ steps.get_version.outputs.version }}"
+          tag_name: ${{ github.event.inputs.version || 'v1.0.0' }}
+          name: "PeDitX OS Packages ${{ github.event.inputs.version || 'v1.0.0' }}"
           files: artifacts/**/*
           generate_release_notes: true
           draft: false
